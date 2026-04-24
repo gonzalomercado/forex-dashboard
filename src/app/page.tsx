@@ -2,9 +2,26 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { logout } from './login/actions'
 import { Activity, LogOut, ShieldAlert, BarChart3, TrendingUp, History } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
 
 export const revalidate = 0 // Disable caching, dynamic data
+
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return ''
+  try {
+    const date = new Date(dateStr)
+    if (isNaN(date.getTime())) return ''
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+    if (seconds < 60) return `${seconds}s ago`
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ago`
+  } catch {
+    return ''
+  }
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -14,12 +31,31 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
-  // Fetch data
-  const { data: statusData } = await supabase.from('agent_status').select('data').eq('id', 1).single()
-  const { data: signals } = await supabase.from('agent_signals').select('*').order('created_at', { ascending: false })
-  const { data: trades } = await supabase.from('trade_history').select('*').order('exit_time', { ascending: false }).limit(20)
-  
-  const status = statusData?.data || {}
+  // Fetch data with error handling
+  let status: any = {}
+  let signals: any[] = []
+  let trades: any[] = []
+
+  try {
+    const { data: statusData } = await supabase.from('agent_status').select('data').eq('id', 1).single()
+    status = statusData?.data || {}
+  } catch (e) {
+    console.error('Error fetching status:', e)
+  }
+
+  try {
+    const { data } = await supabase.from('agent_signals').select('*').order('created_at', { ascending: false })
+    signals = data || []
+  } catch (e) {
+    console.error('Error fetching signals:', e)
+  }
+
+  try {
+    const { data } = await supabase.from('trade_history').select('*').order('exit_time', { ascending: false }).limit(20)
+    trades = data || []
+  } catch (e) {
+    console.error('Error fetching trades:', e)
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-slate-200 p-6 md:p-8 font-sans">
@@ -49,7 +85,7 @@ export default async function DashboardPage() {
                 </span>
               </span>
               <span className="text-slate-500">•</span>
-              <span className="text-slate-400">Acc: {status.account || 'Unknown'}</span>
+              <span className="text-slate-400">Acc: {status.account || 'N/A'}</span>
             </div>
           </div>
         </div>
@@ -75,9 +111,9 @@ export default async function DashboardPage() {
           
           {/* Status Metrics */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <MetricCard title="Open Positions" value={status.open_positions ?? '-'} icon={Activity} />
-            <MetricCard title="Daily Trades" value={status.daily_trades ?? '-'} icon={BarChart3} />
-            <MetricCard title="Losing Streak" value={status.losing_streak ?? '-'} icon={TrendingUp} alert={status.losing_streak >= 3} />
+            <MetricCard title="Open Positions" value={status.open_positions ?? 0} icon={Activity} />
+            <MetricCard title="Daily Trades" value={status.daily_trades ?? 0} icon={BarChart3} />
+            <MetricCard title="Losing Streak" value={status.losing_streak ?? 0} icon={TrendingUp} alert={(status.losing_streak ?? 0) >= 3} />
             <MetricCard title="Risk Exposure" value={`${(status.portfolio_risk?.total_risk_pct ?? 0).toFixed(1)}%`} icon={ShieldAlert} />
           </div>
 
@@ -85,10 +121,10 @@ export default async function DashboardPage() {
           <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-6 backdrop-blur-sm">
             <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-              Live Smart Picks ({signals?.length || 0})
+              Live Smart Picks ({signals.length})
             </h2>
             
-            {signals && signals.length > 0 ? (
+            {signals.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {signals.map((signal) => (
                   <div key={signal.id} className="bg-slate-950/80 rounded-xl p-4 border border-slate-800/60 flex flex-col gap-3">
@@ -130,11 +166,11 @@ export default async function DashboardPage() {
                       <div className="flex items-center gap-3">
                         <div className="flex flex-col">
                           <span className="text-[10px] text-slate-500">MC Robust</span>
-                          <span className="font-medium text-slate-300">{signal.mc_robustness}%</span>
+                          <span className="font-medium text-slate-300">{signal.mc_robustness ?? '-'}%</span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-[10px] text-slate-500">ML Prob</span>
-                          <span className="font-medium text-slate-300">{signal.ml_probability}%</span>
+                          <span className="font-medium text-slate-300">{signal.ml_probability ?? '-'}%</span>
                         </div>
                       </div>
                     </div>
@@ -159,7 +195,7 @@ export default async function DashboardPage() {
           </h2>
           
           <div className="flex-1 overflow-auto pr-2 custom-scrollbar">
-            {trades && trades.length > 0 ? (
+            {trades.length > 0 ? (
               <div className="space-y-3">
                 {trades.map((trade) => (
                   <div key={trade.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800/80">
@@ -180,12 +216,12 @@ export default async function DashboardPage() {
                     
                     <div className="text-right">
                       <div className={`font-mono text-sm font-bold ${
-                        trade.profit_pips > 0 ? 'text-emerald-400' : 'text-rose-400'
+                        (trade.profit_pips ?? 0) > 0 ? 'text-emerald-400' : 'text-rose-400'
                       }`}>
-                        {trade.profit_pips > 0 ? '+' : ''}{trade.profit_pips} pips
+                        {(trade.profit_pips ?? 0) > 0 ? '+' : ''}{trade.profit_pips ?? 0} pips
                       </div>
                       <div className="text-[10px] text-slate-500">
-                        {trade.exit_time ? formatDistanceToNow(new Date(trade.exit_time), { addSuffix: true }) : ''}
+                        {timeAgo(trade.exit_time)}
                       </div>
                     </div>
                   </div>

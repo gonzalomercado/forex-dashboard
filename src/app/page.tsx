@@ -3,7 +3,8 @@ import { redirect } from 'next/navigation'
 import { logout } from './login/actions'
 import { Activity, LogOut, ShieldAlert, BarChart3, TrendingUp, History } from 'lucide-react'
 
-export const revalidate = 0 // Disable caching, dynamic data
+export const revalidate = 0
+export const dynamic = 'force-dynamic'
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return ''
@@ -31,31 +32,21 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
-  // Fetch data with error handling
+  // Fetch data with explicit error checking
   let status: any = {}
   let signals: any[] = []
   let trades: any[] = []
 
-  try {
-    const { data: statusData } = await supabase.from('agent_status').select('data').eq('id', 1).single()
-    status = statusData?.data || {}
-  } catch (e) {
-    console.error('Error fetching status:', e)
+  const statusRes = await supabase.from('agent_status').select('data').eq('id', 1).maybeSingle()
+  if (statusRes.data?.data) {
+    status = statusRes.data.data
   }
 
-  try {
-    const { data } = await supabase.from('agent_signals').select('*').order('created_at', { ascending: false })
-    signals = data || []
-  } catch (e) {
-    console.error('Error fetching signals:', e)
-  }
+  const signalsRes = await supabase.from('agent_signals').select('*').order('created_at', { ascending: false })
+  signals = signalsRes.data || []
 
-  try {
-    const { data } = await supabase.from('trade_history').select('*').order('exit_time', { ascending: false }).limit(20)
-    trades = data || []
-  } catch (e) {
-    console.error('Error fetching trades:', e)
-  }
+  const tradesRes = await supabase.from('trade_history').select('*').order('exit_time', { ascending: false }).limit(20)
+  trades = tradesRes.data || []
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-slate-200 p-6 md:p-8 font-sans">
